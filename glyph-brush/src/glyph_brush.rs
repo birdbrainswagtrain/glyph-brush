@@ -441,7 +441,7 @@ where
         to_vertex: VF,
     ) -> Result<BrushAction<V>, BrushError>
     where
-        Up: FnMut(Rectangle<u32>, &[u8]),
+        Up: FnMut(Rectangle<u32>, PixelKind),
         VF: Fn(GlyphVertex<X>) -> V + Copy,
     {
         let draw_info = LastDrawInfo {

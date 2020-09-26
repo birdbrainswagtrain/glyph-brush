@@ -78,24 +78,24 @@ struct LossyGlyphInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ByteArray2d {
-    inner_array: Vec<u8>,
+pub struct Array2d<T> where T: Clone {
+    inner_array: Vec<T>,
     row: usize,
     col: usize,
 }
 
-impl ByteArray2d {
+impl<T> Array2d<T> where T: Clone {
     #[inline]
-    pub fn zeros(row: usize, col: usize) -> Self {
-        ByteArray2d {
-            inner_array: vec![0; row * col],
+    pub fn filled(row: usize, col: usize, item: T) -> Self {
+        Array2d {
+            inner_array: vec![item; row * col],
             row,
             col,
         }
     }
 
     #[inline]
-    fn as_slice(&self) -> &[u8] {
+    pub fn as_slice(&self) -> &[T] {
         self.inner_array.as_slice()
     }
 
@@ -117,18 +117,18 @@ impl ByteArray2d {
     }
 }
 
-impl ops::Index<(usize, usize)> for ByteArray2d {
-    type Output = u8;
+impl<T> ops::Index<(usize, usize)> for Array2d<T> where T: Clone {
+    type Output = T;
 
     #[inline]
-    fn index(&self, (row, col): (usize, usize)) -> &u8 {
+    fn index(&self, (row, col): (usize, usize)) -> &T {
         &self.inner_array[self.get_vec_index(row, col)]
     }
 }
 
-impl ops::IndexMut<(usize, usize)> for ByteArray2d {
+impl<T> ops::IndexMut<(usize, usize)> for Array2d<T> where T: Clone {
     #[inline]
-    fn index_mut(&mut self, (row, col): (usize, usize)) -> &mut u8 {
+    fn index_mut(&mut self, (row, col): (usize, usize)) -> &mut T {
         let vec_index = self.get_vec_index(row, col);
         &mut self.inner_array[vec_index]
     }
@@ -605,7 +605,7 @@ impl DrawCache {
     ) -> Result<CachedBy, CacheWriteErr>
     where
         F: Font + Sync,
-        U: FnMut(Rectangle<u32>, &[u8]),
+        U: FnMut(Rectangle<u32>, PixelKind),
     {
         let mut queue_success = true;
         let from_empty = self.all_glyphs.is_empty();
@@ -640,6 +640,7 @@ impl DrawCache {
             // outline
             #[cfg(not(target_arch = "wasm32"))]
             let mut uncached_outlined: Vec<_> = if self.multithread && uncached_glyphs.len() > 1 {
+                compile_error!("multithreading not supported");
                 uncached_glyphs
                     .into_par_iter()
                     .filter_map(|(info, glyph)| {
@@ -647,6 +648,7 @@ impl DrawCache {
                     })
                     .collect()
             } else {
+                compile_error!("multithreading not supported");
                 uncached_glyphs
                     .into_iter()
                     .filter_map(|(info, glyph)| {
@@ -816,6 +818,7 @@ impl DrawCache {
             if queue_success {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
+                    compile_error!("multithreading not supported");
                     let glyph_count = draw_and_upload.len();
 
                     if self.multithread && glyph_count > 1 {
@@ -910,7 +913,7 @@ impl DrawCache {
                 {
                     for (tex_coords, outlined) in draw_and_upload {
                         let pixels = draw_glyph(tex_coords, &outlined, self.pad_glyphs);
-                        uploader(tex_coords, pixels.as_slice());
+                        uploader(tex_coords, pixels);
                     }
                 }
             }
@@ -980,22 +983,48 @@ impl DrawCache {
     }
 }
 
+pub enum PixelKind {
+    Simple(Array2d<u8>),
+    Colored(Array2d<u32>)
+}
+
 #[inline]
-fn draw_glyph(tex_coords: Rectangle<u32>, glyph: &OutlinedGlyph, pad_glyphs: bool) -> ByteArray2d {
-    let mut pixels = ByteArray2d::zeros(tex_coords.height() as usize, tex_coords.width() as usize);
-    if pad_glyphs {
-        glyph.draw(|x, y, v| {
+fn draw_glyph(tex_coords: Rectangle<u32>, glyph: &OutlinedGlyph, pad_glyphs: bool) -> PixelKind {
+    let pad = if pad_glyphs { 1 } else { 0 };
+    if let Some(layer_count) = glyph.get_colored_layers() {
+        let mut pixels = Array2d::filled(tex_coords.height() as usize, tex_coords.width() as usize, 0);
+        for i in 0..layer_count {
+            let color = glyph.get_color(i);
+            glyph.draw(i, |x, y, v| {
+                //let v = (v * 255.0).round() as u8;
+                //let r = (v * ((color >> 24) & 0xFF) as f32).round() as u32;
+                //let g = (v * ((color >> 16) & 0xFF) as f32).round() as u32;
+                //let b = (v * ((color >> 8) & 0xFF) as f32).round() as u32;
+                //let a = (v * ((color >> 0) & 0xFF) as f32).round() as u32;
+                // `+ 1` accounts for top/left glyph padding
+                if v != 0.0 {
+                    let iv = 1.0 - v;
+                    let old = pixels[(y as usize + pad, x as usize + pad)];
+                    let r = ((iv * ((old >> 24) & 0xFF) as f32) + (v * ((color >> 24) & 0xFF) as f32)).round() as u32;
+                    let g = ((iv * ((old >> 16) & 0xFF) as f32) + (v * ((color >> 16) & 0xFF) as f32)).round() as u32;
+                    let b = ((iv * ((old >> 8) & 0xFF) as f32) + (v * ((color >> 8) & 0xFF) as f32)).round() as u32;
+                    let a = ((iv * ((old >> 0) & 0xFF) as f32) + (v * ((color >> 0) & 0xFF) as f32)).round() as u32;
+                    pixels[(y as usize + pad, x as usize + pad)] = (r<<24) | (g<<16) | (b<<8) | a;
+                } else {
+                    //panic!("zero value");
+                }
+            });
+        }
+        return PixelKind::Colored(pixels);
+    } else {
+        let mut pixels = Array2d::filled(tex_coords.height() as usize, tex_coords.width() as usize, 0);
+        glyph.draw(0, |x, y, v| {
             let v = (v * 255.0).round() as u8;
             // `+ 1` accounts for top/left glyph padding
-            pixels[(y as usize + 1, x as usize + 1)] = v;
+            pixels[(y as usize + pad, x as usize + pad)] = v;
         });
-    } else {
-        glyph.draw(|x, y, v| {
-            let v = (v * 255.0).round() as u8;
-            pixels[(y as usize, x as usize)] = v;
-        });
+        return PixelKind::Simple(pixels);
     }
-    pixels
 }
 
 #[cfg(test)]
