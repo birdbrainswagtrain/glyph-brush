@@ -996,12 +996,6 @@ fn draw_glyph(tex_coords: Rectangle<u32>, glyph: &OutlinedGlyph, pad_glyphs: boo
         for i in 0..layer_count {
             let color = glyph.get_color(i);
             glyph.draw(i, |x, y, v| {
-                //let v = (v * 255.0).round() as u8;
-                //let r = (v * ((color >> 24) & 0xFF) as f32).round() as u32;
-                //let g = (v * ((color >> 16) & 0xFF) as f32).round() as u32;
-                //let b = (v * ((color >> 8) & 0xFF) as f32).round() as u32;
-                //let a = (v * ((color >> 0) & 0xFF) as f32).round() as u32;
-                // `+ 1` accounts for top/left glyph padding
                 if v != 0.0 {
                     let iv = 1.0 - v;
                     let old = pixels[(y as usize + pad, x as usize + pad)];
@@ -1010,8 +1004,6 @@ fn draw_glyph(tex_coords: Rectangle<u32>, glyph: &OutlinedGlyph, pad_glyphs: boo
                     let b = ((iv * ((old >> 8) & 0xFF) as f32) + (v * ((color >> 8) & 0xFF) as f32)).round() as u32;
                     let a = ((iv * ((old >> 0) & 0xFF) as f32) + (v * ((color >> 0) & 0xFF) as f32)).round() as u32;
                     pixels[(y as usize + pad, x as usize + pad)] = (r<<24) | (g<<16) | (b<<8) | a;
-                } else {
-                    //panic!("zero value");
                 }
             });
         }
