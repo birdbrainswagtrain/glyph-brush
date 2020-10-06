@@ -439,6 +439,7 @@ where
         &mut self,
         update_texture: Up,
         to_vertex: VF,
+        default_extra: &X
     ) -> Result<BrushAction<V>, BrushError>
     where
         Up: FnMut(Rectangle<u32>, PixelKind),
@@ -507,14 +508,14 @@ where
 
                 for hash in &self.section_buffer {
                     let glyphed = self.calculate_glyph_cache.get_mut(hash).unwrap();
-                    glyphed.ensure_vertices(&self.texture_cache, to_vertex);
+                    glyphed.ensure_vertices(&self.texture_cache, to_vertex, default_extra);
                     verts.extend(glyphed.vertices.iter().cloned());
                 }
 
                 for glyphed in &mut self.pre_positioned {
                     // pre-positioned glyph vertices can't be cached so
                     // generate & move straight into draw vec
-                    glyphed.ensure_vertices(&self.texture_cache, to_vertex);
+                    glyphed.ensure_vertices(&self.texture_cache, to_vertex, default_extra);
                     verts.append(&mut glyphed.vertices);
                 }
 
@@ -688,7 +689,7 @@ impl<V, X> Glyphed<V, X> {
     }
 
     /// Calculate vertices if not already done
-    fn ensure_vertices<F>(&mut self, texture_cache: &DrawCache, to_vertex: F)
+    fn ensure_vertices<F>(&mut self, texture_cache: &DrawCache, to_vertex: F, default_x: &X)
     where
         F: Fn(GlyphVertex<X>) -> V,
     {
@@ -715,11 +716,12 @@ impl<V, X> Glyphed<V, X> {
                         // glyph is totally outside the bounds
                         None
                     } else {
+                        let extra = if sg.glyph.is_colored { default_x } else { &extra[sg.section_index] };
                         Some(to_vertex(GlyphVertex {
                             tex_coords,
                             pixel_coords,
                             bounds,
-                            extra: &extra[sg.section_index],
+                            extra,
                         }))
                     }
                 }
